@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>LL(1) Grammar Analyzer — FIRST, FOLLOW, Parsing Table</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+    }
+    body {
+      font-family: system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 2rem;
+      line-height: 1.5;
+      background: #0f172a;
+      color: #e2e8f0;
+    }
+    h1 {
+      font-size: 1.4rem;
+      margin: 0 0 1rem;
+    }
+    .container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+    .panel {
+      background: #111827;
+      border: 1px solid #1f2937;
+      border-radius: 10px;
+      padding: 1rem;
+    }
+    textarea, pre, code, input, button {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+    textarea {
+      width: 100%;
+      min-height: 160px;
+      resize: vertical;
+      background: #0b1220;
+      color: #e2e8f0;
+      border: 1px solid #1f2937;
+      border-radius: 8px;
+      padding: 0.75rem;
+    }
+    .row {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+      margin-top: 0.75rem;
+    }
+    button {
+      background: #2563eb;
+      color: white;
+      border: none;
+      padding: 0.6rem 1rem;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    button.secondary {
+      background: #374151;
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    pre {
+      background: #0b1220;
+      color: #93c5fd;
+      border: 1px solid #1f2937;
+      border-radius: 8px;
+      padding: 0.75rem;
+      overflow: auto;
+      min-height: 160px;
+    }
+    table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+    th, td { border: 1px solid #ddd; padding: 6px; text-align: left; font-family: monospace; }
+    th { background: #0b1220; }
+    .ok { color: #0a7; font-weight: 600; }
+    .bad { color: #c33; font-weight: 600; }
+    .conflict { background: #fde2e2; }
+    .tip { color: #555; font-size: 0.9em; }
+  </style>
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@5" rel="stylesheet" type="text/css" />
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body>
+
+
+  <div><h1 class="text-3xl text-center">CODE<span class="text-teal-900 font-bold">SHARP</span></h1>
+</div>
+    
+
+<ul class="grid grid-cols-3 gap-25  pt-10">
+    
+            <li class="bg-blue-800 text-white px-4 py-2 rounded cursor-pointer hover:bg-blue-700 text-xl"><a href="compiler.html">LL1 Parser</a></li>
+            <li class="bg-blue-800 text-white px-4 py-2 rounded cursor-pointer hover:bg-blue-700 text-xl"><a href="Assembly.html">Three-address code</a></li>
+            <li class="bg-blue-800 text-white px-4 py-2 rounded cursor-pointer hover:bg-blue-700 text-xl"><a href="threeAddressCode.html">Assembly-like instructions</a></li>
+        </ul>
+
+
+  <h1 class="pt-10">LL(1) Grammar Analyzer</h1>
+  <p class="tip">
+    Format: One production per line. Use <code>A -> α | β</code>. Epsilon: <code>eps</code>. End marker: <code>$</code>.<br>
+    Nonterminals uppercase (e.g., <code>E</code>, <code>T</code>), terminals lowercase/symbols (e.g., <code>id</code>, <code>+</code>, <code>(</code>).
+  </p>
+
+  <textarea id="grammarInput" placeholder="E -> T E'
+E' -> + T E' | eps
+T -> F T'
+T' -> * F T' | eps
+F -> ( E ) | id">E -> T E'
+E' -> + T E' | eps
+T -> F T'
+T' -> * F T' | eps
+F -> ( E ) | id
+</textarea>
+
+  <button id="computeBtn">Compute FIRST, FOLLOW, LL(1), Parsing Table</button>
+
+  <h2>FIRST sets</h2>
+  <pre id="firstOut"></pre>
+
+  <h2>FOLLOW sets</h2>
+  <pre id="followOut"></pre>
+
+  <h2>Parsing table</h2>
+  <div id="tableOut"></div>
+
+  <h2>LL(1) status</h2>
+  <pre id="ll1Out"></pre>
+
+  <script>
+    (() => {
+  const EPS = 'eps';
+  const END = '$';
+
+  // Parse grammar: { A: [ [symbols], ... ] }, nonterminals list, start symbol
+  function parseGrammar(text) {
+    const lines = text.split('\n').map(s => s.trim()).filter(Boolean);
+    const grammar = {};
+    const nonTerminals = [];
+    let startSymbol = null;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line.includes('->')) continue;
+      const [lhsRaw, rhsRaw] = line.split('->').map(s => s.trim());
+      const lhs = lhsRaw;
+      if (i === 0) startSymbol = lhs;
+      if (!nonTerminals.includes(lhs)) nonTerminals.push(lhs);
+
+      const alts = rhsRaw.split('|').map(s => s.trim());
+      grammar[lhs] = grammar[lhs] || [];
+      for (const alt of alts) {
+        const symbols = alt.length ? alt.split(/\s+/) : [EPS];
+        grammar[lhs].push(symbols);
+      }
+    }
+    return { grammar, nonTerminals, startSymbol };
+  }
+
+  // Recursive FIRST(symbol) mirroring your C++ logic
+  function makeFirstComputer(grammar) {
+    const FIRST = {};
+
+    function computeFirst(symbol) {
+      if (FIRST[symbol]) return FIRST[symbol];
+      const result = new Set();
+
+      // terminal or eps
+      if (!/^[A-Z]/.test(symbol) || symbol === EPS) {
+        result.add(symbol);
+        return result;
+      }
+
+      // nonterminal
+      const prods = grammar[symbol] || [];
+      for (const prod of prods) {
+        let allEps = true;
+        for (const sym of prod) {
+          const temp = computeFirst(sym);
+          for (const t of temp) result.add(t);
+          if (!temp.has(EPS)) { allEps = false; break; }
+        }
+        if (allEps) result.add(EPS);
+      }
+      FIRST[symbol] = result;
+      return result;
+    }
+
+    return { FIRST, computeFirst };
+  }
+
+  // FOLLOW sets (iterative) per your C++ rules
+  function computeFollowSets(grammar, nonTerminals, startSymbol, computeFirst) {
+    const FOLLOW = {};
+    for (const nt of nonTerminals) FOLLOW[nt] = new Set();
+    if (startSymbol) FOLLOW[startSymbol].add(END);
+
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const lhs in grammar) {
+        for (const prod of grammar[lhs]) {
+          for (let i = 0; i < prod.length; i++) {
+            const B = prod[i];
+            if (!nonTerminals.includes(B)) continue;
+
+            if (i + 1 < prod.length) {
+              const next = prod[i + 1];
+              const firstNext = computeFirst(next);
+              for (const x of firstNext) {
+                if (x !== EPS && !FOLLOW[B].has(x)) {
+                  FOLLOW[B].add(x);
+                  changed = true;
+                }
+              }
+              if (firstNext.has(EPS)) {
+                for (const x of FOLLOW[lhs]) {
+                  if (!FOLLOW[B].has(x)) {
+                    FOLLOW[B].add(x);
+                    changed = true;
+                  }
+                }
+              }
+            } else {
+              for (const x of FOLLOW[lhs]) {
+                if (!FOLLOW[B].has(x)) {
+                  FOLLOW[B].add(x);
+                  changed = true;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    return FOLLOW;
+  }
+
+  // Build parsing table and detect conflicts (LL(1) check)
+  function buildParsingTable(grammar, nonTerminals, FIRST, FOLLOW, computeFirst) {
+    const table = {};
+    const conflicts = [];
+    let isLL1 = true;
+
+    for (const A of nonTerminals) {
+      table[A] = {};
+      for (const prod of grammar[A]) {
+        // FIRST of production (sequence)
+        const firstSet = new Set();
+        let allEps = true;
+        for (const sym of prod) {
+          const temp = computeFirst(sym);
+          for (const t of temp) firstSet.add(t);
+          if (!temp.has(EPS)) { allEps = false; break; }
+        }
+        if (allEps) firstSet.add(EPS);
+
+        const rhsStr = prod.length ? prod.join(' ') : EPS;
+
+        // M[A, a] for a in FIRST(prod) \ {eps}
+        for (const a of firstSet) {
+          if (a === EPS) continue;
+          const prev = table[A][a];
+          const next = `${A}->${rhsStr}`;
+          if (prev && prev !== next) { isLL1 = false; conflicts.push([A, a, prev, next]); }
+          table[A][a] = next;
+        }
+
+        // If eps in FIRST(prod), M[A, b] for b in FOLLOW(A)
+        if (firstSet.has(EPS)) {
+          for (const b of FOLLOW[A]) {
+            const prev = table[A][b];
+            const next = `${A}->eps`;
+            if (prev && prev !== next) { isLL1 = false; conflicts.push([A, b, prev, next]); }
+            table[A][b] = next;
+          }
+        }
+      }
+    }
+    return { table, isLL1, conflicts };
+  }
+
+  // Collect terminals
+  function collectTerminals(grammar, nonTerminals) {
+    const terminals = new Set();
+    for (const lhs in grammar) {
+      for (const prod of grammar[lhs]) {
+        for (const sym of prod) {
+          if (!nonTerminals.includes(sym) && sym !== EPS) terminals.add(sym);
+        }
+      }
+    }
+    terminals.add(END);
+    return terminals;
+  }
+
+  // Render helpers
+  function setToString(S) { return '{ ' + Array.from(S).join(', ') + ' }'; }
+
+  function renderTable(table, nonTerminals, terminals, conflicts) {
+    const conflictSet = new Set(conflicts.map(c => `${c[0]}|${c[1]}`));
+    let html = '<table><thead><tr><th>Nonterminal</th>';
+    for (const t of terminals) html += `<th>${t}</th>`;
+    html += '</tr></thead><tbody>';
+    for (const A of nonTerminals) {
+      html += `<tr><td><b>${A}</b></td>`;
+      for (const t of terminals) {
+        const key = `${A}|${t}`;
+        const entry = table[A][t] || '';
+        const cls = conflictSet.has(key) ? ' class="conflict"' : '';
+        html += `<td${cls}>${entry}</td>`;
+      }
+      html += '</tr>';
+    }
+    html += '</tbody></table>';
+    return html;
+  }
+
+  // Wire up UI
+  document.getElementById('computeBtn').addEventListener('click', () => {
+    const text = document.getElementById('grammarInput').value.trim();
+    if (!text) return;
+
+    const { grammar, nonTerminals, startSymbol } = parseGrammar(text);
+    const { FIRST, computeFirst } = makeFirstComputer(grammar);
+
+    // Compute FIRST for all nonterminals
+    for (const nt of nonTerminals) computeFirst(nt);
+
+    // FOLLOW
+    const FOLLOW = computeFollowSets(grammar, nonTerminals, startSymbol, computeFirst);
+
+    // Table + LL(1)
+    const { table, isLL1, conflicts } = buildParsingTable(grammar, nonTerminals, FIRST, FOLLOW, computeFirst);
+
+    // Terminals
+    const terminals = collectTerminals(grammar, nonTerminals);
+
+    // Output FIRST
+    const firstLines = nonTerminals.map(nt => `${nt} : ${setToString(FIRST[nt])}`).join('\n');
+    document.getElementById('firstOut').textContent = firstLines;
+
+    // Output FOLLOW
+    const followLines = nonTerminals.map(nt => `${nt} : ${setToString(FOLLOW[nt])}`).join('\n');
+    document.getElementById('followOut').textContent = followLines;
+
+    // LL(1) status
+    const ll1El = document.getElementById('ll1Out');
+    if (isLL1) {
+      ll1El.innerHTML = `<span class="ok">Grammar is LL(1): no conflicts.</span>`;
+    } else {
+      const lines = conflicts.map(c => `Conflict at [${c[0]}, ${c[1]}] between { ${c[2]} } and { ${c[3]} }`);
+      ll1El.innerHTML = `<span class="bad">Not LL(1): conflicts found.</span>\n` + lines.join('\n');
+    }
+
+    // Parsing table
+    document.getElementById('tableOut').innerHTML = renderTable(table, nonTerminals, terminals, conflicts);
+  });
+})();
+
+  </script>
+</body>
+</html>

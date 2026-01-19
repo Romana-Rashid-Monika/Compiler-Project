@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Subset of C Compiler (Assignments Only)</title>
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@5" rel="stylesheet" type="text/css" />
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <style>
+    :root {
+      color-scheme: light dark;
+    }
+    body {
+      font-family: system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 2rem;
+      line-height: 1.5;
+      background: #0f172a;
+      color: #e2e8f0;
+    }
+    h1 {
+      font-size: 1.4rem;
+      margin: 0 0 1rem;
+    }
+    .container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+    .panel {
+      background: #111827;
+      border: 1px solid #1f2937;
+      border-radius: 10px;
+      padding: 1rem;
+    }
+    textarea, pre, code, input, button {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+    textarea {
+      width: 100%;
+      min-height: 160px;
+      resize: vertical;
+      background: #0b1220;
+      color: #e2e8f0;
+      border: 1px solid #1f2937;
+      border-radius: 8px;
+      padding: 0.75rem;
+    }
+    .row {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+      margin-top: 0.75rem;
+    }
+    button {
+      background: #2563eb;
+      color: white;
+      border: none;
+      padding: 0.6rem 1rem;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    button.secondary {
+      background: #374151;
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    pre {
+      background: #0b1220;
+      color: #93c5fd;
+      border: 1px solid #1f2937;
+      border-radius: 8px;
+      padding: 0.75rem;
+      overflow: auto;
+      min-height: 160px;
+    }
+  </style>
+</head>
+<body>
+
+
+
+
+    <div><h1 class="text-3xl text-center">CODE<span class="text-teal-900 font-bold">SHARP</span></h1>
+</div>
+    
+
+<ul class="grid grid-cols-3 gap-25  pt-10">
+    
+            <li class="bg-blue-800 text-white px-4 py-2 rounded cursor-pointer hover:bg-blue-700 text-xl"><a href="compiler.html">LL1 Parser</a></li>
+            <li class="bg-blue-800 text-white px-4 py-2 rounded cursor-pointer hover:bg-blue-700 text-xl"><a href="Assembly.html">Three-address code</a></li>
+            <li class="bg-blue-800 text-white px-4 py-2 rounded cursor-pointer hover:bg-blue-700 text-xl"><a href="threeAddressCode.html">Assembly-like instructions</a></li>
+        </ul>
+
+
+
+  <h2 class="pt-10">Subset of C Compiler — Assignments Only</h2>
+  <textarea id="source">int x = 5; y = x + 2;</textarea>
+  <br>
+  <button onclick="compile()">Compile</button>
+  <pre id="output"></pre>
+
+<script>
+function tokenize(input) {
+  const re = /\s+|([A-Za-z_]\w*)|(\d+)|([=;+*\/-])/g;
+  const tokens = [];
+  let m;
+  while ((m = re.exec(input)) !== null) {
+    if (m[0].trim() === "") continue;
+    if (m[1]) tokens.push({type:"id", value:m[1]});
+    else if (m[2]) tokens.push({type:"num", value:m[2]});
+    else tokens.push({type:m[3], value:m[3]});
+  }
+  return tokens;
+}
+
+function compile() {
+  const src = document.getElementById("source").value;
+  const tokens = tokenize(src);
+  let pos = 0;
+  let regCounter = 1;
+  const output = [];
+
+  function next() { return tokens[pos]; }
+  function consume(type) {
+    const t = tokens[pos];
+    if (!t || (type && t.type !== type && t.value !== type)) {
+      throw new Error("Unexpected token: " + JSON.stringify(t));
+    }
+    pos++;
+    return t;
+  }
+
+  function newReg() { return "R" + (regCounter++); }
+
+  function parseStmt() {
+    let t = next();
+    if (t.value === "int") { // declaration
+      consume("id"); // 'int'
+      const id = consume("id").value;
+      consume("=");
+      const rhs = parseExpr();
+      consume(";");
+      output.push(`MOV ${newReg()}, ${rhs}`);
+      output.push(`MOV ${id}, R${regCounter-1}`);
+    } else { // assignment
+      const id = consume("id").value;
+      consume("=");
+      const rhs = parseExpr();
+      consume(";");
+      output.push(`MOV ${newReg()}, ${rhs}`);
+      output.push(`MOV ${id}, R${regCounter-1}`);
+    }
+  }
+
+  function parseExpr() {
+    let left = parseFactor();
+    while (next() && (next().value === "+" || next().value === "-")) {
+      const op = consume(next().value).value;
+      const right = parseFactor();
+      const reg = "R" + (regCounter-1);
+      output.push(`${op === "+" ? "ADD" : "SUB"} ${reg}, ${right}`);
+      left = reg;
+    }
+    return left;
+  }
+
+  function parseFactor() {
+    const t = next();
+    if (t.type === "num") {
+      return consume("num").value;
+    } else if (t.type === "id") {
+      return consume("id").value;
+    } else {
+      throw new Error("Unexpected factor: " + JSON.stringify(t));
+    }
+  }
+
+  try {
+    while (pos < tokens.length) {
+      parseStmt();
+    }
+    document.getElementById("output").textContent = output.join("\n");
+  } catch (e) {
+    document.getElementById("output").textContent = "Error: " + e.message;
+  }
+}
+</script>
+</body>
+</html>
